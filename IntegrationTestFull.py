@@ -2,10 +2,12 @@ import pytest
 import logging
 import tracemalloc
 from unittest.mock import patch, MagicMock
+
 from flask import Flask
 from App import app, ImageUpload, LabelUpload, ParquetExport
 import os
 from App import app, PublishModel
+from App import app, LoginAPI, collection
 from App import app, StartTraining, task_queue, task_complete_event
 from App import app, GetTrainingStats, stats_collection
 from datasets import load_from_disk, load_dataset
@@ -19,6 +21,39 @@ mylogger.addHandler(fhandler)
 mylogger.setLevel(logging.DEBUG)
 tracemalloc.start()
 
+@pytest.fixture
+def client():
+    app.config['TESTING'] = True
+    with app.test_client() as client:
+        collection.insert_one({
+            'username': 'thai',
+            'password': '123'
+        })
+        yield client
+
+def test_login_success(client):
+    response = client.post('/login', json={'username': 'thai', 'password': '123'})
+    assert response.status_code == 200
+    assert response.get_json() == {"message": "Login successful"}
+    mylogger.info('Test for successful login passed.')
+    current, peak = tracemalloc.get_traced_memory()
+    mylogger.info(f"Current memory usage is {current / 10 ** 6}MB; Peak was {peak / 10 ** 6}MB")
+
+def test_login_wrong_password(client):
+    response = client.post('/login', json={'username': 'thai', 'password': 'wrong_password'})
+    assert response.status_code == 401
+    assert response.get_json() == {"message": "Wrong password"}
+    mylogger.info('Test for login with wrong password passed.')
+    current, peak = tracemalloc.get_traced_memory()
+    mylogger.info(f"Current memory usage is {current / 10 ** 6}MB; Peak was {peak / 10 ** 6}MB")
+
+def test_login_user_not_found(client):
+    response = client.post('/login', json={'username': 'non_existent_user', 'password': '123'})
+    assert response.status_code == 404
+    assert response.get_json() == {"message": "User not found"}
+    mylogger.info('Test for login with non-existent user passed.')
+    current, peak = tracemalloc.get_traced_memory()
+    mylogger.info(f"Current memory usage is {current / 10 ** 6}MB; Peak was {peak / 10 ** 6}MB")
 
 def test_image_upload():
     with app.test_request_context():

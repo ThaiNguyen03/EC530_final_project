@@ -34,7 +34,25 @@ publish_model = db['publish_model']
 task_queue = Queue()
 results_dict = {}
 dataset_path = db['dataset_path']
+db_login = client['user_data']
+collection = db_login['users']
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+class LoginAPI(Resource):
+    def post(self):
+        data = request.get_json()
+        username = data.get('username')
+        password = data.get('password')
+        # Check if user exists
+        user = collection.find_one({'username': username})
+        if user:
+            # Check the password
+            if user['password']== password:
+                return {"message": "Login successful"}, 200
+            else:
+                return {"message": "Wrong password"}, 401
+        else:
+            return {"message": "User not found"}, 404
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 class ImageUpload(Resource):
@@ -480,7 +498,7 @@ class InferenceAPI(Resource):
             return result, status_code
         else:
             return {"message": "Error occurred during inference"}, 500
-
+api.add_resource(LoginAPI, '/login')
 api.add_resource(ImageUpload, '/upload_images')
 api.add_resource(LabelUpload, '/upload_label')
 api.add_resource(ParquetExport, '/export_to_parquet')
