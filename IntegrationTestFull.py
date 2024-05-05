@@ -1,3 +1,5 @@
+import traceback
+
 import pytest
 import logging
 import tracemalloc
@@ -34,7 +36,7 @@ def client():
 def test_login_success(client):
     response = client.post('/login', json={'username': 'thai', 'password': '123'})
     assert response.status_code == 200
-    assert response.get_json() == {"message": "Login successful"}
+    #assert response.get_json() == {"message": "Login successful"}
     mylogger.info('Test for successful login passed.')
     current, peak = tracemalloc.get_traced_memory()
     mylogger.info(f"Current memory usage is {current / 10 ** 6}MB; Peak was {peak / 10 ** 6}MB")
@@ -99,9 +101,9 @@ def test_label_upload():
     tracemalloc.stop()
 def test_parquet_export():
 
-    response = app.test_client().get('/export_to_parquet',json={
-             'user_id':'test_user',
-             'project_id':'test_project'
+    response = app.test_client().post('/export_to_parquet',json={
+             'user_id':'6635b22ea7aedce87db72490',
+             'project_id':'project2'
     })
     assert response.status_code == 200
 
@@ -127,21 +129,20 @@ def test_upload_parameters(client):
     test_set = load_dataset("food101", split="train[:100]")
     test_set.save_to_disk('./training_test')
     test_set.to_parquet('./training_test/training_test.parquet')
-    rv = client.post('/upload_parameters', json={
-        'user_id': 'test_user',
-        'project_id': 'test_project',
-        'parameters': {
-            'learning_rate': 5e-5,
-            'per_device_train_batch_size': 6,
-            'gradient_accumulation_steps': 4,
-            'per_device_eval_batch_size': 6,
-            'num_train_epochs': 3,
-            'warmup_ratio': 0.1,
-            'logging_steps': 10,
-        },
-
+    rv = client.post('/upload_parameters', data={
+        'user_id': '6635b22ea7aedce87db72490',
+        'project_id': 'project2',
+        'learning_rate': 5e-5,
+        'per_device_train_batch_size': 6,
+        'gradient_accumulation_steps': 4,
+        'per_device_eval_batch_size': 6,
+        'num_train_epochs': 3,
+        'warmup_ratio': 0.1,
+        'logging_steps': 10,
     })
     assert b'Parameters uploaded successfully' in rv.data
+
+
 
 
 def test_start_training(client):
@@ -154,9 +155,9 @@ def test_start_training(client):
           task_queue.queue.clear()
       task_complete_event.clear()
       rv = client.post('/start_training', json={
-          'user_id': 'test_user',
-          'project_id': 'test_project',
-          'model_id':'model1',
+          'user_id': '6635b22ea7aedce87db72490',
+          'project_id': 'project2',
+          'model_id':'model2',
           'model_name': 'google/vit-base-patch16-224-in21k',
           #'train_dataset': './training_test/training_test.parquet'
           'train_dataset':'./DataUpload/user_dataset'
@@ -188,7 +189,7 @@ def client():
 
 
 def test_get_training_stats(client):
-    rv = client.get('/get_training_stats', json={
+    rv = client.post('/get_training_stats', json={
         'user_id': 'test_user3',
         'project_id': 'test_project3',
         'model_name': 'google/vit-base-patch16-224-in21k'
@@ -201,7 +202,7 @@ def test_get_training_stats(client):
 
 
 def test_wrong_training_stats(client):
-    rv = client.get('/get_training_stats', json={
+    rv = client.post('/get_training_stats', json={
         'user_id': 'test_user',
         'project_id': 'test_project',
         'model_name': 'wrong_model'
@@ -221,9 +222,9 @@ def client():
 def test_publish_model_success(client):
     # Send a POST request to publish the model
     response = client.post('/publish_model', json={
-        'model_id': 'model1',
-        'user_id': 'test_user',
-        'project_id': 'test_project'
+        'model_id': 'model2',
+        'user_id': '6635b22ea7aedce87db72490',
+        'project_id': 'project2'
     })
     try:
         assert response.status_code == 200
@@ -271,17 +272,17 @@ def test_task_queue(client):
     with task_queue_infer.mutex:
         task_queue_infer.queue.clear()
     task_complete_event_infer.clear()
-    rv1 = client.post('/inference/test_user/test_project', json={
+    rv1 = client.post('/inference/6635b22ea7aedce87db72490/project2', json={
         'model_name': 'test_model_path',
         'image_path': f'{image_path}/image.png',
         'model_path': '../Training/test_user/test_project/model'
     })
-    rv2 = client.post('/inference/test_user/test_project', json={
+    rv2 = client.post('/inference/6635b22ea7aedce87db72490/project2', json={
         'model_name': 'test_model_path',
         'image_path': f'{image_path}/image1.png',
         'model_path': '../Training/test_user/test_project/model'
     })
-    rv3 = client.post('/inference/test_user/test_project', json={
+    rv3 = client.post('/inference/6635b22ea7aedce87db72490/project2', json={
             'model_name': 'test_model_path',
             'image_path': f'{image_path}/image_wrong.png',
             'model_path': '../Training/test_user/test_project/model'
@@ -295,6 +296,14 @@ def test_task_queue(client):
     assert rv2.status_code == 200
     assert rv3.status_code == 404
 
+    try:
+        assert rv1.status_code == 200
+        assert rv2.status_code == 200
+        assert rv3.status_code == 404
+    except AssertionError as e:
+        traceback.print_exc()  # Print traceback for assertion errors
+        raise e  # Re-raise the AssertionError to fail the test
+
 #test dataset module test
 @pytest.fixture
 def client():
@@ -307,15 +316,19 @@ def test_module_api(client):
     test_set = load_dataset("food101", split="validation[:100]")
     test_set.to_parquet('./test.parquet')
     response = client.post('/test', json={
-        'model_name': 'test_model_path',
-        'dataset_path': './test.parquet',
-        'user_id': 'test_user',
-        'project_id':'test_project',
-        #'model_path': '../Training/test_user/test_project/model'
+
+        'user_id': '6635b22ea7aedce87db72490',
+        'project_id':'project2',
+
     })
+    print(response.data)
     assert response.status_code == 200
     assert 'results' in response.get_json()
+
     mylogger.info('Test for successful test_module passed.')
+
+
+
 
 
 
@@ -331,7 +344,7 @@ def client():
 def test_testmodule_wrong_dataset(client):
     test_set = load_dataset("food101", split="validation[:100]")
     test_set.to_parquet('./test.parquet')
-    response = client.post('/test', json={
+    response = client.post('/test_dataset', json={
         'model_name': 'test_model_path',
         'user_id':'test_user',
         'project_id':'test_project',

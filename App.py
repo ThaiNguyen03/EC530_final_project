@@ -18,9 +18,10 @@ from threading import Thread, Event
 import shutil
 
 from werkzeug.utils import secure_filename
-
+from flask_cors import CORS
 task_complete_event = Event()
 app = Flask(__name__)
+CORS(app)
 api = Api(app)
 
 # Initialize MongoDB client
@@ -47,7 +48,8 @@ class LoginAPI(Resource):
         if user:
             # Check the password
             if user['password']== password:
-                return {"message": "Login successful"}, 200
+                query = collection.find_one({'username': username,'password':password})
+                return {"message": "Login successful", "user_id": str(query['_id'])}, 200
             else:
                 return {"message": "Wrong password"}, 401
         else:
@@ -57,6 +59,7 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 class ImageUpload(Resource):
     def post(self):
+        #data = request.get_json()
         if 'file' not in request.files:
             return 'No file part', 400
 
@@ -66,15 +69,19 @@ class ImageUpload(Resource):
             return 'No selected file', 400
         if not allowed_file(f.filename):
             return 'File type not allowed', 400
-
+        try:
+            user_id = request.form.get('user_id')
+        #user_id = data.get('user_id')
+            project_id = request.form.get('project_id')
+            dataset_type = request.form.get('dataset_type', 'train')
+            label = request.form.get('label', 'unknown')
+            image_id = request.form.get('image_id')
+        except Exception as e:
+            return {"message":"cannot find form data"},400
         file_name = secure_filename(f.filename)
-        filepath = os.path.join('/<user_id>/<project_id>/images', file_name)
-        user_id = request.form.get('user_id')
-        project_id = request.form.get('project_id')
-        dataset_type = request.form.get('dataset_type', 'train')
-        label = request.form.get('label', 'unknown')
-        image_id = request.form.get('image_id')
-        folder_path = f'./<user_id>/<project_id>/images/{dataset_type}/{label}'
+        filepath = os.path.join(f'./{user_id}/{project_id}/images', file_name)
+
+        folder_path = f'./{user_id}/{project_id}/images/{dataset_type}/{label}'
         if not os.path.exists(folder_path):
 
             os.makedirs(folder_path)
@@ -149,7 +156,7 @@ class LabelUpload(Resource):
 
 
 class ParquetExport(Resource):
-    def get(self):
+    def post(self):
         data = request.get_json()
         user_id = data.get('user_id')
         project_id = data.get('project_id')
@@ -159,21 +166,24 @@ class ParquetExport(Resource):
             test_set = load_dataset("imagefolder",data_dir = path,drop_labels = False)
             test_set.save_to_disk(user_dataset_path)
             abs_dataset_path = os.path.abspath(user_dataset_path)
-            dataset_path.insert_one({
-                'user_id':user_id,
-                'project_id':project_id,
-                'dataset_path':abs_dataset_path
-            })
+
             train_path = os.path.join(user_dataset_path, "train")
+            export_path = f'./{user_id}/{project_id}/export_parquet_files'
+            test_parquet_path = os.path.join(export_path, "test.parquet")
             if os.path.exists(train_path):
                  train_dataset=load_from_disk(train_path)
-                 train_parquet_path = "./train.parquet"
+                 train_parquet_path = os.path.join(export_path,"train.parquet")
                  train_dataset.to_parquet(train_parquet_path)
             test_path = os.path.join(user_dataset_path, "test")
             if os.path.exists(test_path):
                  test_dataset = load_from_disk(test_path)
-                 test_parquet_path = "./test.parquet"
                  test_dataset.to_parquet(test_parquet_path)
+            dataset_path.insert_one({
+                'user_id': user_id,
+                'project_id': project_id,
+                'abs_dataset_path': abs_dataset_path,
+                'test_path': os.path.abspath(test_parquet_path)
+            })
             return {"message:":"dataset saved successfully"},200
         except Exception as e:
             return {"message":"dataset not saved"},404
@@ -199,20 +209,29 @@ def validate_parameters(params):
 
 class UploadParameters(Resource):
     def post(self):
-        data = request.get_json()
-        task_queue.put(data)
-        user_id = data.get('user_id')
-        project_id = data.get('project_id')
-        parameters = data.get('parameters')
+        user_id = request.form.get('user_id')
+        project_id = request.form.get('project_id')
+        parameters = {
+            'learning_rate': float(request.form.get('learning_rate')),
+            'per_device_train_batch_size': int(request.form.get('per_device_train_batch_size')),
+            'gradient_accumulation_steps': int(request.form.get('gradient_accumulation_steps')),
+            'per_device_eval_batch_size': int(request.form.get('per_device_eval_batch_size')),
+            'num_train_epochs': int(request.form.get('num_train_epochs')),
+            'warmup_ratio': float(request.form.get('warmup_ratio')),
+            'logging_steps': int(request.form.get('logging_steps'))
+        }
+
         validation_errors = validate_parameters(parameters)
         if validation_errors:
             return {"message": "Validation failed", "errors": validation_errors}, 400
+
         model_collection.insert_one({
             'user_id': user_id,
             'project_id': project_id,
             'parameters': parameters
         })
         return {"message": "Parameters uploaded successfully"}, 200
+
 def start_training(data):
     try:
         user_id = data.get('user_id')
@@ -223,7 +242,7 @@ def start_training(data):
             'project_id':project_id
         })
         #train_dataset_path = data.get('train_dataset')
-        train_dataset_path = path_query['dataset_path']
+        train_dataset_path = path_query['abs_dataset_path']
         model_id = data.get('model_id')
         # Check if dataset exists
         if not os.path.exists(train_dataset_path):
@@ -350,7 +369,7 @@ class StartTraining(Resource):
         #return {"message": "Training request received"}, 200
 
 class GetTrainingStats(Resource):
-    def get(self):
+    def post(self):
         data = request.get_json()
         user_id = data.get('user_id')
         project_id = data.get('project_id')
@@ -368,17 +387,18 @@ class GetTrainingStats(Resource):
 class PublishModel(Resource):
     def post(self):
         data = request.get_json()
-        model_id = data.get('model_id')
         user_id = data.get('user_id')
         project_id = data.get('project_id')
+        model_id = data.get('model_id')
+
 
         # Search for the model in stats_collection
-        model_entry = stats_collection.find_one({"model_id": model_id})
+        model_entry = stats_collection.find_one({"user_id":user_id,"project_id":project_id,"model_id": model_id})
         if not model_entry:
             return {"message": f"Model with ID {model_id} not found"}, 404
 
         # Create a new folder for the published model if it doesn't exist
-        publish_folder = f"./published_models/{user_id}/{project_id}"
+        publish_folder = f"./{user_id}/{project_id}/published_models"
         if os.path.exists(publish_folder):
             shutil.rmtree(publish_folder)
 
@@ -391,7 +411,6 @@ class PublishModel(Resource):
             publish_model.insert_one({
                 'user_id': user_id,
                 'project_id': project_id,
-                'model_id': model_id,
                 'published_folder_path': os.path.abspath(publish_folder)
             })
         except Exception as e:
@@ -405,44 +424,48 @@ from PIL import Image
 class TestAPI(Resource):
     def post(self):
         data = request.get_json()
-        model_path = data.get('model_path')
-        user_id= data.get('user_id')
+
+        user_id = data.get('user_id')
         project_id = data.get('project_id')
-        dataset_path = data.get('dataset_path')
-        model_name = data.get('model_name')
+        dataset_entry = dataset_path.find_one({"user_id": user_id, "project_id": project_id})
+        if not dataset_entry:
+            return {"message": "Dataset not found"}, 404
+        test_path = dataset_entry.get('abs_dataset_path')
+
         try:
-            model_entry = publish_model.find_one({"user_id":user_id,"project_id":project_id})
+            model_entry = publish_model.find_one({"user_id": user_id, "project_id": project_id})
             model_path = model_entry['published_folder_path']
         except Exception as e:
-            return {"message":"published model not found"},404
-        # Load the dataset
+            return {"message": "Published model not found", "error": str(e)}, 404
+
         try:
-            api_dataset = load_dataset('parquet', data_files=dataset_path)
+            api_dataset = load_from_disk(test_path)
         except Exception as e:
-            return {"message": "dataset not found"}, 404
+            return {"message": "Dataset not found", "error": str(e)}, 404
 
         results = []
 
-        for i in range(len(api_dataset["train"])):
+        for i in range(api_dataset["test"].num_columns):
             try:
-                pil_image = api_dataset["train"][i]["image"]
+                pil_image = api_dataset["test"][i]["image"]
             except Exception as e:
-                return {"message": "Image not found"}, 404
-            image_processor = AutoImageProcessor.from_pretrained(model_path)
-            inputs = image_processor(pil_image, return_tensors="pt")
+                break;
 
-            my_model = AutoModelForImageClassification.from_pretrained(model_path, local_files_only=True)
-            with torch.no_grad():
-                logits = my_model(**inputs).logits
-            predicted = logits.argmax(-1).item()
+            try:
+                image_processor = AutoImageProcessor.from_pretrained(model_path)
+                inputs = image_processor(pil_image, return_tensors="pt")
 
-            results.append(my_model.config.id2label[predicted])
+                my_model = AutoModelForImageClassification.from_pretrained(model_path, local_files_only=True)
+                with torch.no_grad():
+                    logits = my_model(**inputs).logits
+                predicted = logits.argmax(-1).item()
 
-        return {"message": "Inference run successfully",
-                "results": results
-                }, 200
+                results.append(my_model.config.id2label[predicted])
+            except Exception as e:
+                traceback_msg = traceback.format_exc()
+                return {"message": "Error during inference", "error": str(e), "traceback": traceback_msg}, 500
 
-
+        return {"message": "Inference run successfully", "results": results}, 200
 
 
 def inference(data,user_id,project_id):
