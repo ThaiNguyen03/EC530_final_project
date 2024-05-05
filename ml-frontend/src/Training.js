@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-
+import { Link } from 'react-router-dom';
 function Training({ user_id }) {
   const [project_id, setProjectId] = useState('');
   const [model_id, setModelId] = useState('');
@@ -8,6 +8,7 @@ function Training({ user_id }) {
   const [message, setMessage] = useState('');
   const [trainingStats, setTrainingStats] = useState(null);
   const [isPublished, setIsPublished] = useState(false);
+  const [testResults, setTestResults] = useState('');
 
   const startTraining = async () => {
     try {
@@ -20,7 +21,6 @@ function Training({ user_id }) {
       const response = await axios.post('http://127.0.0.1:5000/start_training', data);
       if (response.status === 200) {
         setMessage(response.data.message);
-        // Fetch training stats after starting training
         fetchTrainingStats();
       } else {
         setMessage(response.data.message);
@@ -67,6 +67,24 @@ function Training({ user_id }) {
     }
   };
 
+  const testModel = async () => {
+    try {
+      const data = {
+        user_id,
+        project_id
+      };
+      const response = await axios.post('http://127.0.0.1:5000/test', data);
+      if (response.status === 200) {
+        setTestResults(response.data.results);
+        setMessage(response.data.message);
+      } else {
+        setMessage(response.data.message);
+      }
+    } catch (error) {
+      setMessage('Error testing model: ' + error.message);
+    }
+  };
+
   return (
     <div>
       <h2>Training</h2>
@@ -97,8 +115,20 @@ function Training({ user_id }) {
       {trainingStats && (
         <div>
           <h3>Training Stats</h3>
+          <input
+            type="text"
+            placeholder="Model ID"
+            value={model_id}
+            onChange={(e) => setModelId(e.target.value)}
+          />
+          {<button onClick={publishModel}>Publish</button>}
           <pre>{JSON.stringify(trainingStats, null, 2)}</pre>
-          {!isPublished && <button onClick={publishModel}>Publish</button>}
+
+          {<button onClick={testModel}>Test</button>}
+          {testResults && <div>Test Results: {testResults}</div>}
+          <Link to={`/inference/${user_id}`}>
+            <button>Inference</button>
+          </Link>
         </div>
       )}
     </div>
