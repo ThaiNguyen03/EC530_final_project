@@ -102,8 +102,8 @@ def test_label_upload():
 def test_parquet_export():
 
     response = app.test_client().post('/export_to_parquet',json={
-             'user_id':'6635b22ea7aedce87db72490',
-             'project_id':'project2'
+             'user_id':'test_user',
+             'project_id':'test_project'
     })
     assert response.status_code == 200
 
@@ -130,8 +130,8 @@ def test_upload_parameters(client):
     test_set.save_to_disk('./training_test')
     test_set.to_parquet('./training_test/training_test.parquet')
     rv = client.post('/upload_parameters', data={
-        'user_id': '6635b22ea7aedce87db72490',
-        'project_id': 'project2',
+        'user_id': 'test_user',
+        'project_id': 'test_project',
         'learning_rate': 5e-5,
         'per_device_train_batch_size': 6,
         'gradient_accumulation_steps': 4,
@@ -155,8 +155,8 @@ def test_start_training(client):
           task_queue.queue.clear()
       task_complete_event.clear()
       rv = client.post('/start_training', json={
-          'user_id': '6635b22ea7aedce87db72490',
-          'project_id': 'project2',
+          'user_id': 'test_user',
+          'project_id': 'test_project',
           'model_id':'model2',
           'model_name': 'google/vit-base-patch16-224-in21k',
           #'train_dataset': './training_test/training_test.parquet'
@@ -223,8 +223,8 @@ def test_publish_model_success(client):
     # Send a POST request to publish the model
     response = client.post('/publish_model', json={
         'model_id': 'model2',
-        'user_id': '6635b22ea7aedce87db72490',
-        'project_id': 'project2'
+        'user_id': 'test_user',
+        'project_id': 'test_project'
     })
     try:
         assert response.status_code == 200
@@ -260,7 +260,7 @@ def test_task_queue(client):
     # test_set.save_to_disk('./training_test')
     test_set.to_parquet('./inference.parquet')
     image = test_set["image"][10]
-    image_path = "./inference_data"
+    image_path = "./test_user/test_project/inference_data"
     if not os.path.exists(image_path):
         os.mkdir(image_path)
     image = image.save(f"{image_path}/image.png")
@@ -272,17 +272,17 @@ def test_task_queue(client):
     with task_queue_infer.mutex:
         task_queue_infer.queue.clear()
     task_complete_event_infer.clear()
-    rv1 = client.post('/inference/6635b22ea7aedce87db72490/project2', json={
+    rv1 = client.post('/inference/test_user/test_project', json={
         'model_name': 'test_model_path',
         'image_path': f'{image_path}/image.png',
         'model_path': '../Training/test_user/test_project/model'
     })
-    rv2 = client.post('/inference/6635b22ea7aedce87db72490/project2', json={
+    rv2 = client.post('/inference/test_user/test_project', json={
         'model_name': 'test_model_path',
         'image_path': f'{image_path}/image1.png',
         'model_path': '../Training/test_user/test_project/model'
     })
-    rv3 = client.post('/inference/6635b22ea7aedce87db72490/project2', json={
+    rv3 = client.post('/inference/test_user/test_project', json={
             'model_name': 'test_model_path',
             'image_path': f'{image_path}/image_wrong.png',
             'model_path': '../Training/test_user/test_project/model'
