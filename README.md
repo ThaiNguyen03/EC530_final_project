@@ -24,3 +24,8 @@ The API provides the following endpoints:
 - /test: runs inference on the test dataset uploaded earlier 
 - /inference/<string:user_id>/<string:project_id>: allows users to run inference using a unique endpoint, will return a prediction onto the web interface
 - /upload_inference: allows the user to upload a new image and will pass the path of the image on the server directory to the /inference/<string:user_id>/<string:project_id> endpoint
+
+## Examples of project user interface 
+![parameters][./photos/Parameters.png]
+![training][./photos/training.png]
+![upload][./photos/Upload_screen.png]
